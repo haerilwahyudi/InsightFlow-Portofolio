@@ -30,25 +30,30 @@ class RatingPredictorOptimizer:
             }
             
             model = xgb.XGBRegressor(**params)
-            return cross_val_score(
+            return -cross_val_score(  # NEGATIVE MSE agar bisa diminimalkan
                 model, self.X, self.y,
                 scoring='neg_mean_squared_error',
                 cv=5
             ).mean()
             
-        self.study = optuna.create_study(direction='maximize')
+        self.study = optuna.create_study(direction='minimize')  # Ganti dari maximize ke minimize
         self.study.optimize(objective, n_trials=n_trials)
         
-        self.best_model = xgb.XGBRegressor(**self.study.best_params)
-        self.best_model.fit(self.X, self.y)
+        if self.study.best_params:  # Cek apakah best_params sudah ada
+            self.best_model = xgb.XGBRegressor(**self.study.best_params)
+            self.best_model.fit(self.X, self.y)
         return self.best_model
         
     def create_ensemble(self):
-        """Stacking ensemble of multiple models"""
+        """Stacking ensemble of multiple models with optimized XGBoost"""
+        if self.best_model is None:
+            print("Warning: XGBoost belum dioptimasi, menggunakan default model.")
+            self.best_model = xgb.XGBRegressor()
+        
         estimators = [
-            ('xgb', xgb.XGBRegressor()),
-            ('lgb', lgb.LGBMRegressor()),
-            ('cat', cb.CatBoostRegressor(verbose=0))
+            ('xgb', self.best_model),
+            ('lgb', lgb.LGBMRegressor()),  # Bisa ditambahkan optimasi
+            ('cat', cb.CatBoostRegressor(verbose=0))  # Bisa ditambahkan optimasi
         ]
         
         self.ensemble = StackingRegressor(
@@ -65,6 +70,9 @@ class RatingPredictorOptimizer:
         if model is None:
             model = self.best_model
             
+        if model is None:
+            raise ValueError("Tidak ada model yang bisa dijelaskan.")
+
         explainer = shap.Explainer(model)
         shap_values = explainer(self.X)
         
